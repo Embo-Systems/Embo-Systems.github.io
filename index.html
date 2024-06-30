@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embo Outlier Detection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-900">
+
+    <div class="max-w-3xl mx-auto p-6 bg-white shadow-md rounded-lg">
+        <h1 class="text-2xl font-bold mb-6 text-center">Embo Outlier Detection</h1>
+        
+        <div class="mb-4">
+            <label for="apiKey" class="block text-sm font-medium text-gray-700">OpenAI API Key:</label>
+            <input type="text" id="apiKey" class="mt-1 p-2 block w-full border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter your API key">
+        </div>
+        
+        <div class="mb-4">
+            <label for="image1" class="block text-sm font-medium text-gray-700">Upload Anchor Image:</label>
+            <input type="file" id="image1" accept="image/*" class="mt-1 block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100">
+        </div>
+        
+        <div class="mb-4">
+            <label for="image2" class="block text-sm font-medium text-gray-700">Upload Query Image:</label>
+            <input type="file" id="image2" accept="image/*" class="mt-1 block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100">
+        </div>
+        
+        <button onclick="compareImages()" class="w-full py-2 px-4 bg-indigo-600 text-white font-semibold rounded-md shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50">Run</button>
+        
+        <div class="image-container flex justify-between mt-6">
+            <img id="preview1" src="#" alt="Preview 1" class="max-w-[45%] hidden">
+            <img id="preview2" src="#" alt="Preview 2" class="max-w-[45%] hidden">
+        </div>
+        
+        <div id="output" class="mt-6 p-4 border border-gray-300 rounded-md shadow-sm bg-gray-50">
+            <h2 class="text-xl font-semibold mb-4">Output</h2>
+            <p><strong>Reasoning:</strong> <span id="reasoning"></span></p>
+            <p><strong>Correctness:</strong> <span id="correctness"></span></p>
+        </div>
+    </div>
+    
+    <script>
+        function previewImage(input, previewId) {
+            const preview = document.getElementById(previewId);
+            const file = input.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            }
+
+            if (file) {
+                reader.readAsDataURL(file);
+            }
+        }
+
+        document.getElementById('image1').addEventListener('change', function() {
+            previewImage(this, 'preview1');
+        });
+
+        document.getElementById('image2').addEventListener('change', function() {
+            previewImage(this, 'preview2');
+        });
+
+        async function compareImages() {
+            const apiKey = document.getElementById('apiKey').value;
+            const image1 = document.getElementById('image1').files[0];
+            const image2 = document.getElementById('image2').files[0];
+            const reasoningElem = document.getElementById('reasoning');
+            const correctnessElem = document.getElementById('correctness');
+
+            if (!apiKey || !image1 || !image2) {
+                alert('Please enter your API key and upload both images.');
+                return;
+            }
+
+            try {
+                const image1Base64 = await getBase64(image1);
+                const image2Base64 = await getBase64(image2);
+
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o',
+                        messages: [
+                            {
+                                role: 'user',
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: 'The first image given about the normal scenarios when driving a delivery robot. Please determine whether the second image given about the road experience contains anomalies or defects. If yes, give a specific reason. Normally, the image given should depict clear and identifiable scenario. It may have defects such as broken parts, and contaminations. Your answer should contain 2 parts: “reasoning”: a string, that describes what you think about the given image; “correctness”: an integer, 1 if there is no anomaly in the image, 0 if it is, no partial credit; output this as a dictionary with key reasoning and correctness. don’t output anything else'
+                                    },
+                                    {
+                                        type: 'image_url',
+                                        image_url: {
+                                            url: `data:image/jpeg;base64,${image1Base64}`
+                                        }
+                                    },
+                                    {
+                                        type: 'image_url',
+                                        image_url: {
+                                            url: `data:image/jpeg;base64,${image2Base64}`
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        max_tokens: 300
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const result = await response.json();
+                if (result.choices && result.choices.length > 0) {
+                    const output = JSON.parse(result.choices[0].message.content);
+                    reasoningElem.textContent = output.reasoning;
+                    correctnessElem.textContent = output.correctness;
+                } else {
+                    reasoningElem.textContent = 'No description available';
+                    correctnessElem.textContent = '';
+                }
+            } catch (error) {
+                console.error('Error calling OpenAI API:', error);
+                reasoningElem.textContent = 'Error generating description. Please check your API key and try again.';
+                correctnessElem.textContent = '';
+            }
+        }
+
+        function getBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+        }
+    </script>
+</body>
+</html>
